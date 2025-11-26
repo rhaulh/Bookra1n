@@ -65,7 +65,7 @@ class ActivationWorker(QThread):
                 raise Exception(message)
             
             # # PHASE 8: Final reboot
-            self.reboot_and_wait(10,10)
+            self.detector.reboot_device_thread(self.progress_updated)
 
             # # PHASE 9: SMART ACTIVATION CHECKING WITH RETRY LOGIC
             activation_status = self.smart_activation_check_with_retry()
