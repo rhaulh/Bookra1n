@@ -202,13 +202,10 @@ class ActivationWorker(QThread):
             self.progress_updated.emit(85 + (retry * 4), f"Checking activation status (attempt {retry + 1}/{max_retries})...")
             
             # Check activation status
-            activation_status = self.detector.check_activation_status_thread()
-            print(f"📱 Activation status check {retry + 1}: {activation_status}")
-            
-            if activation_status == "Activated":
+            if self.detector.check_activation_status_thread():
                 print("🎉 Device is ACTIVATED!")
                 return "Activated"
-            elif activation_status == "Unactivated":
+            else:
                 print(f"❌ Device still Unactivated, retry {retry + 1}/{max_retries}")
                 
                 if retry < max_retries - 1:  # Don't reboot on last attempt
@@ -228,15 +225,7 @@ class ActivationWorker(QThread):
                     self.wait_with_progress(45, 90 + (retry * 4), "Waiting 45 seconds after reboot...")
                 else:
                     print("❌ Max retries reached, device still Unactivated")
-                    return "Unactivated"
-            else:
-                print(f"❓ Unknown activation status: {activation_status}")
-                if retry < max_retries - 1:
-                    # Wait and retry for unknown status
-                    self.wait_with_progress(30, 85 + (retry * 4), "Waiting 30 seconds before retry...")
-                else:
-                    return activation_status
-        
+                    return "Unactivated"        
         return "Unactivated"  # Default to Unactivated if all retries fail
     
 # Utility methods
