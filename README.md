@@ -55,7 +55,7 @@ The bypass requires the following files modified with the exact GUID/ECID of the
 
 All these files must be hosted on a server that customizes them and properly signed/edited for the specific device. NOTE. Added a Basic Implementation
 - NEW MobileGestalt Files are needed to complete activation. Server Side has only a few for some iOS Builds
-
+- SMALL UTILITY FOR REGISTERING SERIALS: [https://github.com/rhaulh/A12BypassAdminSerials](https://github.com/rhaulh/A12BypassAdminSerials)
 🎯 **Usage**
 
 1. Connect the iOS device via USB
