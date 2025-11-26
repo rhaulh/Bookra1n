@@ -47,6 +47,7 @@ class DeviceDetector(QMainWindow):
         self.current_product_type = None
         self.cached_models = self.cached_models = {
             # --- iPhone 16 Series (2024) ---
+            "iPhone17,4": "iPhone 16 Plus",
             "iPhone17,3": "iPhone 16 Pro Max",
             "iPhone17,2": "iPhone 16 Pro",
             "iPhone17,1": "iPhone 16 Plus",
