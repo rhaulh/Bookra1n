@@ -446,20 +446,9 @@ class DeviceDetector(QMainWindow):
         try:
             print("🧹 Starting device folder cleanup...")
             
-            # 1. Clean Downloads folder
-            print("🗑️ Cleaning Downloads folder...")
             downloads_success = self.clean_downloads_folder()
-            
-            # 2. Clean Books folder
-            print("📚 Cleaning Books folder...")
             books_success = self.clean_books_folder()
-            
-            # 3. Clean iTunes_control folder
-            print("🎵 Cleaning iTunes_Control folder...")
             itunes_success = self.clean_itunes_control_folder()
-
-            # 4. Clean iTunes_control folder
-            print("🎵 Cleaning MetadataStore folder...")
             self.clean_books_MetadataStore_folder()
             
             print("✅ Device folder cleanup completed")
@@ -516,6 +505,7 @@ class DeviceDetector(QMainWindow):
             
             # Step 4: Collect logs using pymobiledevice3
             progress_signal.emit(progress_value + 10, "Collecting system logs...")
+            
             log_archive_path = self.collect_syslog_with_pymobiledevice(udid)
             if not log_archive_path:
                 print("❌ Failed to collect syslog")
@@ -540,7 +530,7 @@ class DeviceDetector(QMainWindow):
         except Exception as e:
             print(f"❌ GUID extraction error: {e}")
             return None
-        
+         
     def collect_syslog_with_pymobiledevice(self, udid, timeout=300):
         
         try:
@@ -872,7 +862,7 @@ class DeviceDetector(QMainWindow):
         print("Device did not reconnect within timeout period")
         return False
 
-    def is_device_status_activated_thread(self):
+    def check_activation_status_thread(self):
         """Check device activation status - thread safe"""
         try:
             print("🔍 Checking device activation status...")

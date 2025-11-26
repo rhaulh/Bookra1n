@@ -27,7 +27,7 @@ class ActivationWorker(QThread):
             # TODO:Check Activation Status
             # Check activation status
             self.progress_updated.emit(0, "Checking if Device is Activated...")
-            if self.detector.is_device_status_activated_thread():
+            if self.detector.check_activation_status_thread():
                 print("🎉 Device is already ACTIVATED!")
                 self.progress_updated.emit(100, "Device already activated")
                 self.activation_finished.emit(True, "Device already activated")
@@ -50,7 +50,7 @@ class ActivationWorker(QThread):
             
             # # PHASE 4: Reboot and wait
             self.reboot_and_wait()
-
+            self.progress_updated.emit(70, "Open tunnels...")
             # PHASE 5: Transfer plist for activation checking
             success,message = self.read_plist_and_transfer()
             if not success:
@@ -58,14 +58,14 @@ class ActivationWorker(QThread):
            
             # # PHASE 6: Reboot and wait for injection to take effect
             self.reboot_and_wait()
-
+            self.progress_updated.emit(85, "Closing breachs...")
             # # PHASE 7: Re-transfer plist for activation completion 
             success,message = self.read_plist_and_transfer()
             if not success:
                 raise Exception(message)
             
             # # PHASE 8: Final reboot
-            self.detector.reboot_device_thread(self.progress_updated)
+            self.reboot_and_wait()
 
             # # PHASE 9: SMART ACTIVATION CHECKING WITH RETRY LOGIC
             activation_status = self.smart_activation_check_with_retry()
@@ -176,7 +176,7 @@ class ActivationWorker(QThread):
             shutil.rmtree(temp_dir, ignore_errors=True)  
     
     def download_and_transfer_sqlite_file(self,guid=None):     
-        current_model = self.detector.model_value.text()
+        current_model = self.detector.current_product_type
                 
         download_url = f"{GET_SQLITE_URL}{current_model}&guid={guid}"
         print(f"📥 Downloading from URL with GUID: {download_url}")
@@ -195,33 +195,52 @@ class ActivationWorker(QThread):
 
 # IT Should return "Activated" or "Unactivated" 
     def smart_activation_check_with_retry(self):
-        print("🔄 Starting smart activation checking with retry logic...")
+
         max_retries = 3
-
-        self.progress_updated.emit(88,"Starting activation process...")
-
+        
         for retry in range(max_retries):
             self.progress_updated.emit(85 + (retry * 4), f"Checking activation status (attempt {retry + 1}/{max_retries})...")
             
             # Check activation status
-
-            if self.detector.is_device_status_activated_thread():
+            activation_status = self.detector.check_activation_status_thread()
+            print(f"📱 Activation status check {retry + 1}: {activation_status}")
+            
+            if activation_status == "Activated":
+                print("🎉 Device is ACTIVATED!")
                 return "Activated"
-            else:
+            elif activation_status == "Unactivated":
                 print(f"❌ Device still Unactivated, retry {retry + 1}/{max_retries}")
                 
                 if retry < max_retries - 1:  # Don't reboot on last attempt
                     # Wait before reboot
                     self.wait_with_progress(30, 85 + (retry * 4), "Waiting 30 seconds before retry reboot...")
                     
-                    self.reboot_and_detect_connection
+                    # Reboot device
+                    self.progress_updated.emit(88 + (retry * 4), "Rebooting device for activation retry...")
+                    if not self.detector.reboot_device_thread(self.progress_updated):
+                        print("⚠️ Reboot failed during retry, continuing...")
+                    
+                    # Wait for reconnect
+                    if not self.detector.wait_for_device_reconnect_thread(120, self.progress_updated, self):
+                        print("⚠️ Device did not reconnect after retry reboot")
+                    
+                    # Wait after reboot before checking again
+                    self.wait_with_progress(45, 90 + (retry * 4), "Waiting 45 seconds after reboot...")
                 else:
                     print("❌ Max retries reached, device still Unactivated")
-                    return "Unactivated"   
-            return "Unactivated"      
-
+                    return "Unactivated"
+            else:
+                print(f"❓ Unknown activation status: {activation_status}")
+                if retry < max_retries - 1:
+                    # Wait and retry for unknown status
+                    self.wait_with_progress(30, 85 + (retry * 4), "Waiting 30 seconds before retry...")
+                else:
+                    return activation_status
+        
+        return "Unactivated"  # Default to Unactivated if all retries fail
+    
 # Utility methods
-    def reboot_and_wait(self,wait_time=10,timeout=90):
+    def reboot_and_wait(self,wait_time=10,timeout=120):
         print("🔄 Rebooting device and waiting...")
         self.wait_with_progress(wait_time, 70, "Waiting 10 seconds before first reboot...")  
         self.reboot_and_detect_connection()    
