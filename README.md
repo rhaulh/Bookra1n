@@ -14,7 +14,8 @@ Based on the original exploit by strawhatdev01 and the sandbox escape of `itunes
 - Advanced anti-analysis and anti-debugging protection
 - Automatic GUID/ECID extraction
 - Multi-phase activation process with automatic retries
-
+- Basic Server Side Implementation
+  
 ## 🛡️ Integrated Security Measures
 
 - Anti-debugging / anti-ptrace
@@ -52,7 +53,8 @@ The bypass requires the following files modified with the exact GUID/ECID of the
 - asset3.epub → contains modified com.apple.MobileGestalt.plist
 - Empty minimal plist file
 
-All these files must be hosted on a server that customizes them and properly signed/edited for the specific device.
+All these files must be hosted on a server that customizes them and properly signed/edited for the specific device. NOTE. Added a Basic Implementation
+- NEW MobileGestalt Files are needed to complete activation. Server Side has only a few for some iOS Builds
 
 🎯 **Usage**
 
