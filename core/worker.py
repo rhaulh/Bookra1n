@@ -33,47 +33,13 @@ class ActivationWorker(QThread):
                 self.activation_finished.emit(True, "Device already activated")
                 return
             
-            # # PHASE 1: Extract GUID
-            self.progress_updated.emit(0, "Starting GUID extraction...")
-            success, guid = self.extract_guid()
-            if not success:
-                raise Exception("Failed to extract GUID after multiple attempts")           
-            # # PHASE 2: Clean device folders
-
-           
-            self.progress_updated.emit(20, "Cleaning device folders...")
-            self.clean_folders()
-
-            # # PHASE 3: Download and inject SQLite file
-            self.progress_updated.emit(50, "Injecting files...")
-            success,message = self.download_and_transfer_sqlite_file(guid)     
-            if not success:
-                raise Exception(message)  
-            
-            # # PHASE 4: Reboot and wait
-            self.reboot_and_wait()
-            self.progress_updated.emit(70, "Open tunnels...")
-            # PHASE 5: Transfer plist for activation checking
-            success,message = self.read_plist_and_transfer()
-            if not success:
-                raise Exception(message)
-           
-            # # PHASE 6: Reboot and wait for injection to take effect
-            self.reboot_and_wait()
-            self.progress_updated.emit(85, "Closing breachs...")
-            # # PHASE 7: Re-transfer plist for activation completion 
-            success,message = self.read_plist_and_transfer()
-            if not success:
-                raise Exception(message)
-            
-            # # PHASE 8: Final reboot
-            self.reboot_and_wait()
-
+          
             # # PHASE 9: SMART ACTIVATION CHECKING WITH RETRY LOGIC
             activation_status = self.smart_activation_check_with_retry()
               
             # # Show final result based on activation state
             if activation_status == "Activated":
+                print("🎉 Device is ACTIVATED!")
                 self.progress_updated.emit(100, "Activation complete!")
                 
             #     # Send Telegram notification for success
@@ -132,15 +98,89 @@ class ActivationWorker(QThread):
                 telegram_notifier.send_activation_failed(device_model, serial_number, imei, error_message)
             except:
                 pass
+# IT Should return "Activated" or "Unactivated" 
+
+    def smart_activation_check_with_retry(self):
+
+        max_retries = 2
+        success,guid = self.try_to_get_cached_guid()
+        if not success: 
+            self.progress_updated.emit(0, "Starting GUID extraction...")
+            success, guid = self.extract_guid()
+        
+        for retry in range(max_retries):
+
+  # # PHASE 1: GUID Checks          
+            
+            # # PHASE 2: Clean device folders           
+            self.progress_updated.emit(20, "Cleaning device folders...")
+            self.clean_folders()
+
+            # # PHASE 3: Download and inject SQLite file
+            self.progress_updated.emit(50, "Injecting files...")
+            success,message = self.download_and_transfer_sqlite_file(guid)     
+            if not success:
+                raise Exception(message)  
+            
+            # # PHASE 4: Reboot and wait
+            self.reboot_and_wait()
+            self.progress_updated.emit(70, "Open tunnels...")
+            # PHASE 5: Transfer plist for activation checking
+            success,message = self.read_plist_and_transfer()
+            if not success:
+                raise Exception(message)
+           
+            # # PHASE 6: Reboot and wait for injection to take effect
+            self.reboot_and_wait()
+            self.progress_updated.emit(85, "Closing breachs...")
+            # # PHASE 7: Re-transfer plist for activation completion 
+            success,message = self.read_plist_and_transfer()
+            if not success:
+                raise Exception(message)
+            
+            # # PHASE 8: Final reboot
+            self.reboot_and_wait()
+            
+            self.progress_updated.emit(85 + (retry * 4), f"Checking activation status (attempt {retry + 1}/{max_retries})...")
+            
+            # Check activation status
+            if self.detector.check_activation_status_thread():
+                return "Activated"
+            else:
+                print(f"❌ Device still Unactivated, retry {retry + 1}/{max_retries}")
+                
+                if retry < max_retries - 1:  # Don't reboot on last attempt
+                    # Wait before reboot
+                    self.wait_with_progress(30, 85 + (retry * 4), "Waiting 30 seconds before retry reboot...")
+                    
+                    # Reboot device
+                    self.progress_updated.emit(88 + (retry * 4), "Rebooting device for activation retry...")
+                    if not self.detector.reboot_device_thread(self.progress_updated):
+                        print("⚠️ Reboot failed during retry, continuing...")
+                    
+                    # Wait for reconnect
+                    if not self.detector.wait_for_device_reconnect_thread(120, self.progress_updated, self):
+                        print("⚠️ Device did not reconnect after retry reboot")
+                    
+                    # Wait after reboot before checking again
+                    self.wait_with_progress(45, 90 + (retry * 4), "Waiting 45 seconds after reboot...")
+                else:
+                    print("❌ Max retries reached, device still Unactivated")
+                    return "Unactivated"        
+        return "Unactivated"  # Default to Unactivated if all retries fail
+    
 
 #   STEPS SUMMARY
-    def extract_guid(self):
-     # PHASE 1: Extract GUID using the proper method with multiple attempts
-     #   TODO: Before extracting GUIDs we are gona ask if previous GUIDs are stored to increase activation speed
+    def try_to_get_cached_guid(self):
         success,guid = self.detector.fetch_guid_from_api()
         if success:
             print(f"Found GUID in Cache: {guid}")
             return True,guid
+        return False,None
+    
+    def extract_guid(self):
+     # PHASE 1: Extract GUID using the proper method with multiple attempts
+     #   TODO: Before extracting GUIDs we are gona ask if previous GUIDs are stored to increase activation speed
         
         max_attempts = 4
             
@@ -199,41 +239,6 @@ class ActivationWorker(QThread):
             return False, message
         return True, "Plist file transferred successfully"
 
-# IT Should return "Activated" or "Unactivated" 
-    def smart_activation_check_with_retry(self):
-
-        max_retries = 3
-        
-        for retry in range(max_retries):
-            self.progress_updated.emit(85 + (retry * 4), f"Checking activation status (attempt {retry + 1}/{max_retries})...")
-            
-            # Check activation status
-            if self.detector.check_activation_status_thread():
-                print("🎉 Device is ACTIVATED!")
-                return "Activated"
-            else:
-                print(f"❌ Device still Unactivated, retry {retry + 1}/{max_retries}")
-                
-                if retry < max_retries - 1:  # Don't reboot on last attempt
-                    # Wait before reboot
-                    self.wait_with_progress(30, 85 + (retry * 4), "Waiting 30 seconds before retry reboot...")
-                    
-                    # Reboot device
-                    self.progress_updated.emit(88 + (retry * 4), "Rebooting device for activation retry...")
-                    if not self.detector.reboot_device_thread(self.progress_updated):
-                        print("⚠️ Reboot failed during retry, continuing...")
-                    
-                    # Wait for reconnect
-                    if not self.detector.wait_for_device_reconnect_thread(120, self.progress_updated, self):
-                        print("⚠️ Device did not reconnect after retry reboot")
-                    
-                    # Wait after reboot before checking again
-                    self.wait_with_progress(45, 90 + (retry * 4), "Waiting 45 seconds after reboot...")
-                else:
-                    print("❌ Max retries reached, device still Unactivated")
-                    return "Unactivated"        
-        return "Unactivated"  # Default to Unactivated if all retries fail
-    
 # Utility methods
     def reboot_and_wait(self,wait_time=10,timeout=120):
         print("🔄 Rebooting device and waiting...")
