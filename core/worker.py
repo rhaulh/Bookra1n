@@ -4,9 +4,12 @@ from PyQt5.QtCore import QThread, pyqtSignal
 import time, os, tempfile
 from telegram.notifier import telegram_notifier
 from security.monitor import security_monitor
+from core.api import API
+from core.guid_service import GuidService
 from config import GET_SQLITE_URL,ACTIVATION_COMPLETED_URL
+from core.garbage_colector import GarbageCollector
 
-class ActivationWorker(QThread):
+class ActivationWorker(QThread,GarbageCollector):
     progress_updated = pyqtSignal(int, str)
     activation_finished = pyqtSignal(bool, str)
     guid_extracted = pyqtSignal(str)
@@ -16,136 +19,144 @@ class ActivationWorker(QThread):
         self.detector = detector
         self.is_running = True
         self.extracted_guid = None
+        self.guid_service = GuidService(
+            progress_updated=self.progress_updated,
+            guid_extracted=self.guid_extracted
+        )
         
     def run(self):
+        error_message = None
+
         try:
             # Security check at start
             if security_monitor.check_api_sniffing() or security_monitor.check_proxy_usage():
                 self.activation_finished.emit(False, "Security violation detected - Proxy usage not allowed")
                 return
-            
-            # TODO:Check Activation Status
+
             # Check activation status
             self.progress_updated.emit(0, "Checking if Device is Activated...")
+            
             if self.detector.check_activation_status_thread():
                 print("🎉 Device is already ACTIVATED!")
                 self.progress_updated.emit(100, "Device already activated")
                 self.activation_finished.emit(True, "Device already activated")
                 return
-            
-          
-            # # PHASE 9: SMART ACTIVATION CHECKING WITH RETRY LOGIC
+
+            # Smart activation check with retry
             activation_status = self.smart_activation_check_with_retry()
-              
-            # # Show final result based on activation state
+
+            # Common device info for Telegram
+            device_model = self.detector.ui.model_value.text()
+            serial_number = self.detector.ui.serial_value.text()
+            imei = self.detector.ui.imei_value.text()
+
             if activation_status == "Activated":
                 print("🎉 Device is ACTIVATED!")
                 self.progress_updated.emit(100, "Activation complete!")
-                
-            #     # Send Telegram notification for success
-                device_model = self.detector.ui.model_value.text()
-                serial_number = self.detector.ui.serial_value.text()
-                imei = self.detector.ui.imei_value.text()
-                
-            #     # Send success notification via Telegram
+
                 telegram_notifier.send_activation_success(device_model, serial_number, imei)
-                
+
                 self.activation_finished.emit(True, "Activation successful - Device Activated")
-                self.detector.send_complete_status_to_api()
+                API.send_complete_status(serial_number)
+
             elif activation_status == "Unactivated":
                 self.progress_updated.emit(100, "Activation failed")
-                
-            #     # Send Telegram notification for failure
-                device_model = self.detector.ui.model_value.text()
-                serial_number = self.detector.ui.serial_value.text()
-                imei = self.detector.ui.imei_value.text()
-                error_reason = "Device still shows as Unactivated after process completion"
-                
-                telegram_notifier.send_activation_failed(device_model, serial_number, imei, error_reason)
-                
+
+                telegram_notifier.send_activation_failed(
+                    device_model, serial_number, imei,
+                    "Device still shows as Unactivated after process completion"
+                )
+
                 self.activation_finished.emit(False, "Activation failed - device still Unactivated")
-            else:
+
+            else:  # Unknown status
                 self.progress_updated.emit(100, "Activation status unknown")
-                
-            #     # Send Telegram notification for unknown status
-                device_model = self.detector.ui.model_value.text()
-                serial_number = self.detector.ui.serial_value.text()
-                imei = self.detector.ui.imei_value.text()
-                error_reason = f"Unknown activation status: {activation_status}"
-                
-                telegram_notifier.send_activation_failed(device_model, serial_number, imei, error_reason)
-                
+
+                telegram_notifier.send_activation_failed(
+                    device_model, serial_number, imei,
+                    f"Unknown activation status: {activation_status}"
+                )
+
                 self.activation_finished.emit(False, f"Activation status unknown: {activation_status}")
-            
+
         except Exception as e:
             error_message = str(e)
             print(f"Activation error: {e}")
             self.activation_finished.emit(False, error_message)
+
         finally:
-        # # Clean up folders even if activation failed
+            # Clean up
             try:
                 self.progress_updated.emit(99, "🚀 Activate Device")
                 self.clean_folders()
             except:
                 pass
 
-        #  # Send Telegram notification for error
-            try:
-                device_model = self.detector.ui.model_value.text()
-                serial_number = self.detector.ui.serial_value.text()
-                imei = self.detector.ui.imei_value.text()
-                
-                telegram_notifier.send_activation_failed(device_model, serial_number, imei, error_message)
-            except:
-                pass
+            # Only send Telegram error if a real exception occurred
+            if error_message:
+                try:
+                    device_model = self.detector.ui.model_value.text()
+                    serial_number = self.detector.ui.serial_value.text()
+                    imei = self.detector.ui.imei_value.text()
+
+                    telegram_notifier.send_activation_failed(device_model, serial_number, imei, error_message)
+                except:
+                    pass
+
 # IT Should return "Activated" or "Unactivated" 
     def injection_stage(self,guid):
-        # # PHASE 2: Clean device folders           
-        self.progress_updated.emit(20, "Cleaning device folders...")
-        self.clean_folders()
+        try:
+            # # PHASE 2: Clean device folders           
+            self.progress_updated.emit(20, "Cleaning device folders...")
+            self.clean_folders()
 
-                # # PHASE 3: Download and inject SQLite file
-        self.progress_updated.emit(50, "Injecting files...")
-        success,message = self.download_and_transfer_sqlite_file(guid)     
-        if not success:
-            raise Exception(message)  
+                    # # PHASE 3: Download and inject SQLite file
+            self.progress_updated.emit(50, "Injecting files...")
+            success,message = self.download_and_transfer_sqlite_file(guid)     
+            if not success:
+                raise Exception(message)  
+                    
+            # # PHASE 4: Reboot and wait
+            self.reboot_and_wait()
+            self.progress_updated.emit(70, "Open tunnels...")
+            # PHASE 5: Transfer plist for activation checking
+            success,message = self.read_plist_and_transfer()
+            if not success:
+                raise Exception(message)
                 
-        # # PHASE 4: Reboot and wait
-        self.reboot_and_wait()
-        self.progress_updated.emit(70, "Open tunnels...")
-        # PHASE 5: Transfer plist for activation checking
-        success,message = self.read_plist_and_transfer()
-        if not success:
-            raise Exception(message)
-            
-        # # PHASE 6: Reboot and wait for injection to take effect
-        self.reboot_and_wait()
-        self.progress_updated.emit(85, "Closing breachs...")
-        # # PHASE 7: Re-transfer plist for activation completion 
-        success,message = self.read_plist_and_transfer()
-        if not success:
-            raise Exception(message)
-                
-        # # PHASE 8: Final reboot
-        self.reboot_and_wait()
+            # # PHASE 6: Reboot and wait for injection to take effect
+            self.reboot_and_wait()
+            self.progress_updated.emit(85, "Closing breachs...")
+            # # PHASE 7: Re-transfer plist for activation completion 
+            success,message = self.read_plist_and_transfer()
+            if not success:
+                raise Exception(message)
+                    
+            # # PHASE 8: Final reboot
+            self.reboot_and_wait()
+        except:
+            # TODO: Check what to do when Injection fails to early escape
+            pass
+        finally:
+            pass
 
     def smart_activation_check_with_retry(self):
 
         max_retries = 2
-        success,guid = self.try_to_get_cached_guid()
+        success,guid = self.guid_service.try_to_get_cached_guid(self.detector.current_serial)
         if success: 
             self.injection_stage(guid)
             if self.detector.check_activation_status_thread():
                 return "Activated"
             else:
                 # Deleting stored GUID because it was regenerated in the Device so its different from stored one
-                self.detector.send_guid_to_api('')
+                API.send_guid(self.detector.current_serial,'')
             
         self.progress_updated.emit(0, "Starting GUID extraction...")
         success, guid = self.extract_guid()  
         if not success:
             return "Unactivated"
-        
+
         for retry in range(max_retries): 
             self.injection_stage(guid)         
 
@@ -178,12 +189,6 @@ class ActivationWorker(QThread):
     
 
 #   STEPS SUMMARY
-    def try_to_get_cached_guid(self):
-        success,guid = self.detector.fetch_guid_from_api()
-        if success:
-            print(f"Found GUID in Cache: {guid}")
-            return True,guid
-        return False,None
     
     def extract_guid(self):
      # PHASE 1: Extract GUID using the proper method with multiple attempts
@@ -196,12 +201,12 @@ class ActivationWorker(QThread):
                 
             self.progress_updated.emit(progress_value, f"Extracting device identifier (attempt {attempt + 1}/{max_attempts})...")
                 
-            guid = self.detector.extract_guid_proper_method(progress_value, self.progress_updated)
+            guid = self.guid_service.extract_guid_proper_method(progress_value, self.progress_updated)
                 
             if guid:
                 self.extracted_guid = guid
                 self.guid_extracted.emit(guid)
-                                    
+                API.send_guid(self.detector.current_serial,guid)                    
                 return True,guid
             else:
                 if attempt < max_attempts - 1:
@@ -212,7 +217,8 @@ class ActivationWorker(QThread):
     
     def clean_folders(self):
         print("🧹 Cleaning up device folders...")
-        self.detector.cleanup_device_folders_thread()
+        # TODO:Safe Thread
+        self.cleanup_device_folders_thread()
    
     def download_and_transfer_file(self, file,destination_folder, download_url):
         temp_dir = tempfile.mkdtemp()
@@ -241,7 +247,7 @@ class ActivationWorker(QThread):
         return True, "SQLite file injected successfully"
     
     def read_plist_and_transfer(self):
-        success, message =self.detector.copy_file_from_device_to_device("iTunes_Control/iTunes/iTunesMetadata.plist","Books")
+        success, message =self.copy_file_from_device_to_device("iTunes_Control/iTunes/iTunesMetadata.plist","Books")
         if not success:
             return False, message
         return True, "Plist file transferred successfully"
