@@ -137,6 +137,9 @@ class ActivationWorker(QThread):
             self.injection_stage(guid)
             if self.detector.check_activation_status_thread():
                 return "Activated"
+            else:
+                # Deleting stored GUID because it was regenerated in the Device so its different from stored one
+                self.detector.send_guid_to_api('')
             
         self.progress_updated.emit(0, "Starting GUID extraction...")
         success, guid = self.extract_guid()  
