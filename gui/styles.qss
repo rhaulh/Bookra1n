@@ -1,0 +1,42 @@
+/* gui/styles/activate_button.qss */
+
+QPushButton[state="waiting"],
+QPushButton:disabled {
+    background-color: #0000008f;
+    color: #e57878c1;
+    border: 2px solid #4a49498f;
+    border-radius: 12px;
+    padding: 12px 24px;
+    font-weight: bold;
+    font-size: 16px;
+}
+
+QPushButton[state="waiting"]:hover,
+QPushButton:disabled:hover {
+    background-color: #bdc3c7;
+}
+
+QPushButton[state="ready"],
+QPushButton:enabled {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                stop:0 #5d55efff, stop:1 #4b2383ff);
+    color: white;
+    border: none;
+    border-radius: 12px;
+    padding: 12px 24px;
+    font-weight: bold;
+    font-size: 16px;
+    min-width: 180px;
+}
+
+QPushButton[state="ready"]:hover {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                stop:0 #090463ff, stop:1 #17082dc7);
+    border: 2px solid #4a49498f;
+}
+
+QPushButton[state="ready"]:pressed {
+    background-color: #0000008f;
+    color: #e57878c1;
+    border: 2px solid #4a49498f;
+}

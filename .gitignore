@@ -1,0 +1,17 @@
+__pycache__/
+venv/
+bkp/
+dist/
+build/
+ServerSide/
+logs/
+/app.log
+/config.py
+/Bookra1n.spec
+/version.txt
+/admin.manifest
+/lol.py
+/build.ps1
+/bump_version.py
+.vscode/
+/core/worker2.py
