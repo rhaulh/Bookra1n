@@ -30,53 +30,6 @@ class DeviceCommands:
             return False,None
         except:
             return False, None
-    
-    def retry_pairing(self,repair_attempted,udid=None):
-        try:
-            idevicepair_path = get_lib_path('idevicepair.exe')
-
-            if not repair_attempted:
-                repair_attempted = True
-
-                suffix = ["-u", udid] if udid else []
-
-                logger.info("🔧 Starting lockdown repair cycle...")
-
-                steps = [
-                    ([idevicepair_path, "unpair"] + suffix, "Unpair"),
-                    ([idevicepair_path, "pair"] + suffix, "Pair"),
-                    ([idevicepair_path, "validate"] + suffix, "Validate"),
-                    ([idevicepair_path, "pair", "--daemon"] + suffix, "Restart session"),
-                ]
-
-                for cmd, name in steps:
-                    repair, out = run_subprocess_no_console(cmd)
-                    logger.info(f"{name}: {out.strip()}")
-                    time.sleep(0.5)
-
-                if self.have_device_full_connection():
-                    return True
-
-                logger.warning("Lockdown repair failed, trying usbmuxd restart...")
-                return self.restart_usbmuxd() and self.have_device_full_connection()
-            
-            return False
-        except:
-            return False
-
-    def restart_usbmuxd():
-        try:
-            run_subprocess_no_console(["taskkill", "/IM", "usbmuxd.exe", "/F"])
-            time.sleep(1)
-            run_subprocess_no_console(["usbmuxd.exe", "--exit"])
-            time.sleep(1)
-            run_subprocess_no_console(["usbmuxd.exe", "--launchd"])
-            time.sleep(2)
-            logger.info("🔄 usbmuxd restarted")
-            return True
-        except Exception as e:
-            logger.error(f"usbmuxd restart failed: {e}")
-            return False
         
     def wait_device_reconnect_sync(self, timeout=120):
         try:

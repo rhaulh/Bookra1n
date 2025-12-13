@@ -3,7 +3,7 @@ import os
 import time
 import inspect
 import winreg
-
+from gui.dialogs import CustomMessageBox
 class SecurityMonitor:
     _instance = None
     _initialized = False
@@ -80,3 +80,10 @@ class SecurityMonitor:
             if self.check_code_injection() or self.check_api_sniffing():
                 break
             time.sleep(5)
+    
+    def show_proxy_warning_message(self):
+        dialog = CustomMessageBox(
+            "🚨 Security Violation",
+            "Proxy usage detected!",
+        )
+        dialog.exec_()

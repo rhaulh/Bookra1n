@@ -47,13 +47,6 @@ class DeviceDetector(QMainWindow,Draggable,DeviceCommands):
         self.current_device = DeviceInfo()
         self.new_device = DeviceInfo()  
 
-        # Flags
-        self.activation_in_progress = False
-        self.wait_for_reboot = False
-        self.repair_attempted = False
-        self.skipping_authorization_check = False
-        self.skipping_model_check = False
-
         # Connect signals
         self.device_connected.connect(self.on_device_connected)
         self.show_auth_dialog.connect(self.on_show_auth_dialog)
@@ -73,8 +66,10 @@ class DeviceDetector(QMainWindow,Draggable,DeviceCommands):
         # Start monitoring in background: Security and Device Connection
         self.start_security_monitoring()
         self.setup_device_monitor()
+        self.setup_auth_monitor()
 
     def reset_activation_status(self):
+        self.repair_attempted = False
         self.authorization_checked = False
         self.waiting_authorization = False
         self.auth_thread_running = False
@@ -92,24 +87,20 @@ class DeviceDetector(QMainWindow,Draggable,DeviceCommands):
         security_thread.start()
      
     def setup_device_monitor(self):
-        self.timer = QTimer()
-        self.timer.timeout.connect(self.check_device_connection_status)
-        self.timer.start(2000)
+        self.device_timer = QTimer()
+        self.device_timer.timeout.connect(self.check_device_connection_status)
+        self.device_timer.start(2000)
 
     def setup_auth_monitor(self):
-        self.timer = QTimer()
-        self.timer.timeout.connect(self.check_authorization)
-        self.timer.start(2000)
+        self.auth_timer = QTimer()
+        self.auth_timer.timeout.connect(self.check_authorization)
+        self.auth_timer.start(2000)
 
     def check_device_connection_status(self):
         def device_check_thread():
             try:
                 connected, info = self.have_device_full_connection()
                 if connected:
-                    self.device_connected.emit(True,"Full",info)
-                    return
-
-                if self.retry_pairing(self.repair_attempted):
                     self.device_connected.emit(True,"Full",info)
                     return
 
@@ -142,7 +133,6 @@ class DeviceDetector(QMainWindow,Draggable,DeviceCommands):
                 if not self.is_device_connected:
                     if connection_type == "Full":
                         self.parse_device_info(info)
-                        self.setup_auth_monitor()
                     if connection_type == "Limited":
                         self.handle_basic_connection(info.strip())
                         
@@ -216,10 +206,7 @@ class DeviceDetector(QMainWindow,Draggable,DeviceCommands):
         self.ui.update_ui(device_basic_info)
 
     def check_authorization(self):
-        if not self.current_device.serial or not self.current_device.model or not self.current_device.ios:
-            self.logger.warning("Incomplete device info - skipping authorization check")
-            self.update_status_label.emit("Collecting device info...", False)
-            self.enable_activate_btn.emit(False)
+        if not self.is_device_connected or self.current_device.pair != "Full":
             return
 
         serial = self.current_device.serial
@@ -244,24 +231,23 @@ class DeviceDetector(QMainWindow,Draggable,DeviceCommands):
             self.skipping_model_check = True
 
         if self.current_device.authorized:
-            auth_status = API.check_authorization(serial)
+            authorized = API.check_authorization(serial)
 
-            if auth_status == "not_authorized":
+            if not authorized:
                 self.current_device.authorized = False
                 self.authorization_checked = False
                 self.waiting_authorization = False
                 self.update_status_label.emit("Not Authorized", False)
                 self.enable_activate_btn.emit(False)
-            else:
-                return
+            return
             
         if self.authorization_checked:
             return
 
         try:
-            auth_status = API.check_authorization(serial)
+            authorized,status = API.check_authorization(serial)
 
-            if auth_status == "authorized":
+            if authorized:
                 self.logger.info(f"Device AUTHORIZED: {serial}")
                 self.current_device.authorized = True
                 self.authorization_checked = True
@@ -276,7 +262,7 @@ class DeviceDetector(QMainWindow,Draggable,DeviceCommands):
 
                 return
 
-            elif auth_status == "not_authorized":
+            elif not authorized:
                 if not self.waiting_authorization:
                     self.logger.debug("Device NOT authorized → showing dialog")
                     self.waiting_authorization = True
@@ -288,12 +274,11 @@ class DeviceDetector(QMainWindow,Draggable,DeviceCommands):
                 self.enable_activate_btn.emit(False)
                 return
 
-            elif auth_status == "proxy_detected":
-                self.show_proxy_warning_message()
+            elif status == "proxy_detected":
+                self.security_monitor.show_proxy_warning_message()
                 self.update_status_label.emit("Security Violation", False)
                 self.enable_activate_btn.emit(False)
                 return
-
             else:
                 self.update_status_label.emit("Connected", True)
                 self.enable_activate_btn.emit(False)
@@ -313,7 +298,7 @@ class DeviceDetector(QMainWindow,Draggable,DeviceCommands):
             return
         
         if self.security_monitor.check_api_sniffing() or self.security_monitor.check_proxy_usage():
-            self.show_proxy_warning_message()
+            self.security_monitor.show_proxy_warning_message()
             return
 
         if not InstructionDialog.show_instructions(self):                               
@@ -447,15 +432,6 @@ class DeviceDetector(QMainWindow,Draggable,DeviceCommands):
         dialog = ActivationResultDialog(
             "Not Authorized",
             "Device not authorized for activation",
-            is_success=False,
-            parent=self
-        )
-        dialog.exec_()
-    
-    def show_proxy_warning_message(self):
-        dialog = ActivationResultDialog(
-            "🚨 Security Violation",
-            "Proxy usage detected!",
             is_success=False,
             parent=self
         )

@@ -40,11 +40,6 @@ class ActivationWorker(QThread, DeviceCommands):
 
             self._update_progress(0, "Checking if Device is Activated...")
 
-            if self.check_activation_status():
-                self._update_progress(100, "Device already activated")
-                self._finish(True, "Device already activated")
-                return
-
             self._ensure_activation_not_stopped()
 
             activation_success = self.smart_activation_check_with_retry()
@@ -181,26 +176,22 @@ class ActivationWorker(QThread, DeviceCommands):
             self._ensure_activation_not_stopped()
             self.logger.info(f"Extracting device identifier (attempt {attempt + 1}/{max_attempts})...")
 
-            try:
-                self.logger.debug("Starting GUID extraction process...")         
-            
-                self.reboot_and_detect_connection(self.waiting_for_reboot)
+            self.logger.debug("Starting GUID extraction process...")         
+        
+            if not self.reboot_and_detect_connection(self.waiting_for_reboot):
+                return False, None
 
-                extracted_guid = self.guid_service.extract_guid_proper_method(
-                    self.device.udid,
-                    self.progress_value,
-                    self.progress_updated
-                )
-            except Exception as e:
-                self.logger.debug(f"GUID extraction call failed: {e}")
-                extracted_guid = None
+            extracted_guid = self.guid_service.extract_guid_proper_method(
+                self.device.udid,
+                self.progress_value,
+                self.progress_updated
+            )
 
             if extracted_guid:
                 self.logger.debug(f"🎯 FOUND GUID: {extracted_guid}")
                 return True, extracted_guid
-
+                
             self.logger.warning(f"GUID not found on attempt {attempt + 1}")
-            # espera corta antes de reintentar para no spamear el dispositivo
             time.sleep(1)
 
         self.logger.error("FAILED: Could not extract GUID after multiple attempts")
@@ -223,7 +214,6 @@ class ActivationWorker(QThread, DeviceCommands):
             if not self.reboot_and_detect_connection(self.waiting_for_reboot):
                 return False, "Reboot Failed"
             
-
             success, status = self.check_file_injection(PAYLOAD2, 200)
             if not success:
                 return False, "wifi"
@@ -231,8 +221,6 @@ class ActivationWorker(QThread, DeviceCommands):
             success, message = self.read_plist_and_transfer()
             if not success:
                 return False, message
-
-            self.logger.debug(message)
 
             self.wait_with_progress(30)
 
@@ -311,6 +299,7 @@ class ActivationWorker(QThread, DeviceCommands):
             success, message = self.afc.copy_file_from_device_to_device(PAYLOAD2, "Books")
             if not success:
                 return False, message
+            
             return True, "Payload injected successfully"
         except Exception as e:
             self.logger.error(f"read_plist_and_transfer error: {e}")
