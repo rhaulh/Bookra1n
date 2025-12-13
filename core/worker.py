@@ -221,6 +221,8 @@ class ActivationWorker(QThread, DeviceCommands):
             success, message = self.read_plist_and_transfer()
             if not success:
                 return False, message
+            
+            self.wait_with_progress(30)
 
             if not self.reboot_and_detect_connection(self.waiting_for_reboot):
                 return False, "Reboot Failed"
